@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      PROJECT_NAME: my-ai-idle-resource-app
+    steps:
+      - uses: actions/checkout@v4
+
+      # Add AWS credentials configuration here
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Run scanner unit tests (if any)
+        run: |
+          python -m pip install -r lambdas/scanner/requirements.txt || true
+          echo "Add pytest tests to lambdas/ if you want CI unit tests."
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push scanner image (PR)
+        run: |
+          REPO="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-scanner"
+          docker build -t scanner:pr-${{ github.sha }} lambdas/scanner
+          docker tag scanner:pr-${{ github.sha }} $REPO:pr-${{ github.sha }}
+          aws ecr create-repository --repository-name "${{ env.PROJECT_NAME }}-${{ github.ref_name }}-scanner" || true
+          docker push $REPO:pr-${{ github.sha }}
+
+      - name: Build & push action image (PR)
+        run: |
+          REPO="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-action"
+          docker build -t action:pr-${{ github.sha }} lambdas/action
+          docker tag action:pr-${{ github.sha }} $REPO:pr-${{ github.sha }}
+          aws ecr create-repository --repository-name "${{ env.PROJECT_NAME }}-${{ github.ref_name }}-action" || true
+          docker push $REPO:pr-${{ github.sha }}
+
+      - name: Build & push ai image (PR)
+        run: |
+          REPO="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-ai"
+          docker build -t ai:pr-${{ github.sha }} lambdas/ai_insights
+          docker tag ai:pr-${{ github.sha }} $REPO:pr-${{ github.sha }}
+          aws ecr create-repository --repository-name "${{ env.PROJECT_NAME }}-${{ github.ref_name }}-ai" || true
+          docker push $REPO:pr-${{ github.sha }}
